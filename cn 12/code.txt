@@ -1,0 +1,39 @@
+receiver:
+import socket
+
+def tcp_echo_server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('localhost', 12345))
+    server_socket.listen(1)
+    print("TCP server listening on port 12345")
+
+    while True:
+        conn, addr = server_socket.accept()
+        print(f"Connected to {addr}")
+        
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
+            print(f"Received from client: {data.decode()}")
+            conn.sendall(data)  # Echo back the data
+        conn.close()
+        print(f"Connection with {addr} closed")
+
+tcp_echo_server()
+sender:
+import socket
+
+def tcp_echo_client():
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.connect(('localhost', 12345))
+    
+    try:
+        message = input("Enter a message: ")
+        client_socket.sendall(message.encode())
+        data = client_socket.recv(1024)
+        print(f"Received from server: {data.decode()}")
+    finally:
+        client_socket.close()
+
+tcp_echo_client()
