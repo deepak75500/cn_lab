@@ -1,0 +1,90 @@
+import socket
+import struct
+import time
+import select
+import os
+
+ICMP_ECHO_REQUEST = 8  # ICMP type code for echo request
+
+def checksum(source_string):
+    """Calculate checksum for the ICMP packet."""
+    sum = 0
+    countTo = (len(source_string) // 2) * 2
+    count = 0
+
+    while count < countTo:
+        thisVal = (source_string[count + 1]) * 256 + (source_string[count])
+        sum = sum + thisVal
+        sum = sum & 0xffffffff
+        count = count + 2
+
+    if countTo < len(source_string):
+        sum = sum + (source_string[len(source_string) - 1])
+        sum = sum & 0xffffffff
+
+    sum = (sum >> 16) + (sum & 0xffff)
+    sum = sum + (sum >> 16)
+    answer = ~sum
+    answer = answer & 0xffff
+    answer = answer >> 8 | (answer << 8 & 0xff00)
+    return answer
+
+def create_packet(id):
+    """Create a new ICMP echo request packet based on the given ID."""
+    header = struct.pack('bbHHh', ICMP_ECHO_REQUEST, 0, 0, id, 1)
+    data = struct.pack('d', time.time())
+    packet_checksum = checksum(header + data)
+    header = struct.pack('bbHHh', ICMP_ECHO_REQUEST, 0, socket.htons(packet_checksum), id, 1)
+    return header + data
+
+def receive_pong(sock, id, timeout):
+    """Receive the pong response and calculate the round-trip time."""
+    time_left = timeout
+    while True:
+        start_time = time.time()
+        readable = select.select([sock], [], [], time_left)
+        time_received = time.time()
+        if not readable[0]:
+            return None
+
+        rec_packet, addr = sock.recvfrom(1024)
+        icmp_header = rec_packet[20:28]
+        type, code, checksum, packet_id, sequence = struct.unpack("bbHHh", icmp_header)
+        if packet_id == id:
+            bytes_in_double = struct.calcsize("d")
+            time_sent = struct.unpack("d", rec_packet[28:28 + bytes_in_double])[0]
+            return time_received - time_sent
+
+        time_left -= time_received - start_time
+        if time_left <= 0:
+            return None
+
+def ping(host, timeout=1):
+    """Send an ICMP ping request to a host."""
+    try:
+        ip = socket.gethostbyname(host)
+        print(f"Pinging {host} [{ip}] with Python:")
+    except socket.gaierror:
+        print("Could not resolve host")
+        return
+
+    # Create a raw socket
+    with socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP) as sock:
+        sock.settimeout(timeout)
+        id = os.getpid() & 0xFFFF  # Use the process ID as the packet ID
+        packet = create_packet(id)
+
+        try:
+            sock.sendto(packet, (ip, 1))  # Send ping
+            delay = receive_pong(sock, id, timeout)  # Receive pong
+        except socket.error as e:
+            print(f"Socket error: {e}")
+            return
+
+        if delay is None:
+            print("Request timed out.")
+        else:
+            print(f"Reply from {ip}: time={delay * 1000:.2f}ms")
+
+# Example usage:
+ping("google.com")
