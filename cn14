@@ -1,0 +1,97 @@
+packet sniffing:
+import socket
+import os
+from struct import *
+
+# Function to extract Ethernet address (MAC address)
+def eth_addr(addr):
+    return ':'.join(map(lambda x: format(x, '02x'), addr))
+
+# Create a raw socket
+# AF_PACKET is for Linux systems, which allows us to capture packets at the link layer (Ethernet).
+try:
+    s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))  # AF_PACKET is for Ethernet
+except socket.error as msg:
+    print('Socket could not be created. Error Code: ' + str(msg[0]) + ' Message ' + msg[1])
+    exit()
+
+# Set the socket to capture all incoming and outgoing packets
+# Replace 'wlan0' with your network interface name for Wi-Fi (for example, 'wlp3s0' on some Linux systems or 'en0' on macOS)
+s.bind(('wlan0', 0))  # Replace 'wlan0' with the correct Wi-Fi interface name
+
+# Loop to sniff packets
+print("Starting packet sniffer... Press Ctrl+C to stop.")
+while True:
+    # Receive packets
+    packet = s.recvfrom(65565)  # Receive packets of size 65565 bytes
+    packet = packet[0]  # Extract packet
+
+    # Ethernet header (14 bytes)
+    eth_header = packet[:14]
+    eth = unpack('!6s6sH', eth_header)
+    eth_protocol = socket.ntohs(eth[2])  # Extract protocol (e.g., IP, ARP)
+
+    print("\nEthernet Frame:")
+    print('Destination MAC: ' + eth_addr(packet[0:6]) + ' Source MAC: ' + eth_addr(packet[6:12]) + ' Protocol: ' + str(eth_protocol))
+
+    # Parse IP packets (Protocol 8 is IP)
+    if eth_protocol == 8:
+        ip_header = packet[14:34]
+        iph = unpack('!BBHHHBBH4s4s', ip_header)
+
+        version_ihl = iph[0]
+        version = version_ihl >> 4
+        ihl = version_ihl & 0xF
+        iph_length = ihl * 4
+        ttl = iph[5]
+        protocol = iph[6]
+        s_addr = socket.inet_ntoa(iph[8])
+        d_addr = socket.inet_ntoa(iph[9])
+
+        print("\nIP Header:")
+        print('Version: ' + str(version) + ' IP Header Length: ' + str(ihl) + ' TTL: ' + str(ttl) + ' Protocol: ' + str(protocol) + ' Source IP: ' + s_addr + ' Destination IP: ' + d_addr)
+
+        # If the packet is TCP
+        if protocol == 6:
+            t = iph_length + 14
+            tcp_header = packet[t:t+20]
+            tcph = unpack('!HHLLBBHHH', tcp_header)
+
+            source_port = tcph[0]
+            dest_port = tcph[1]
+            sequence = tcph[2]
+            acknowledgment = tcph[3]
+            doff_reserved = tcph[4]
+            tcph_length = doff_reserved >> 4
+
+            print("\nTCP Segment:")
+            print('Source Port: ' + str(source_port) + ' Dest Port: ' + str(dest_port) + ' Sequence Number: ' + str(sequence) + ' Acknowledgment: ' + str(acknowledgment) + ' TCP header length: ' + str(tcph_length))
+
+        # If the packet is ICMP (Protocol 1)
+        elif protocol == 1:
+            u = iph_length + 14
+            icmph_length = 4
+            icmp_header = packet[u:u+4]
+            icmph = unpack('!BBH', icmp_header)
+
+            icmp_type = icmph[0]
+            code = icmph[1]
+            checksum = icmph[2]
+
+            print("\nICMP Packet:")
+            print('Type: ' + str(icmp_type) + ' Code: ' + str(code) + ' Checksum: ' + str(checksum))
+
+        # If the packet is UDP (Protocol 17)
+        elif protocol == 17:
+            u = iph_length + 14
+            udph_length = 8
+            udp_header = packet[u:u+8]
+            udph = unpack('!HHHH', udp_header)
+
+            source_port = udph[0]
+            dest_port = udph[1]
+            length = udph[2]
+            checksum = udph[3]
+
+            print("\nUDP Packet:")
+            print('Source Port: ' + str(source_port) + ' Dest Port: ' + str(dest_port) + ' Length: ' + str(length) + ' Checksum: ' + str(checksum))
